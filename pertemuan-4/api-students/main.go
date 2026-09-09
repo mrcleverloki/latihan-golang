@@ -2,66 +2,61 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/requestid"
-
 	"api-students/app/repository"
+	"api-students/app/service"
 	"api-students/config"
 	"api-students/database"
 )
 
 func main() {
-	// 1. Muat konfigurasi environment
+	// 1. Inisialisasi environment dan logger terstruktur
 	config.LoadEnv()
+	logger := config.NewLogger()
 
-	// 2. Buat connection pool database
+	// 2. Koneksi ke database
 	pool, err := database.NewPool(context.Background())
 	if err != nil {
-		log.Fatalf("database error: %v", err)
+		logger.Error("gagal terhubung ke database", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 	defer pool.Close()
 
-	// 3. Dependency Injection: Pool -> Repository -> Handler
+	// 3. Dependency Injection: Repository -> Service
 	studentRepo := repository.NewStudentRepository(pool)
-	studentHandler := NewStudentHandler(studentRepo)
+	studentService := service.NewStudentService(studentRepo)
 
-	// 4. Inisialisasi Fiber
-	app := fiber.New(fiber.Config{
-		AppName: "Praktikum Backend - Students API v1",
-	})
-
-	app.Use(requestid.New())
-	app.Use(logger.New())
-	app.Use(cors.New())
-
-	api := app.Group("/api/v1")
-
-	// Endpoint health check (memeriksa server dan koneksi DB)
-	api.Get("/health", func(c *fiber.Ctx) error {
-		ctx, cancel := context.WithTimeout(c.UserContext(), 2*time.Second)
-		defer cancel()
-
-		if err := pool.Ping(ctx); err != nil {
-			return fail(c, fiber.StatusServiceUnavailable, "database tidak dapat dihubungi")
-		}
-		return ok(c, "server dan database berjalan normal", nil)
-	})
-
-	// Routing Students
-	s := api.Group("/students", requireJSON)
-	s.Get("/", studentHandler.List)
-	s.Get("/:id", studentHandler.Get)
-	s.Post("/", studentHandler.Create)
-	s.Put("/:id", studentHandler.Replace)
-	s.Patch("/:id", studentHandler.Patch)
-	s.Delete("/:id", studentHandler.Delete)
-
+	// 4. Inisialisasi App
+	app := config.NewApp(logger, pool, studentService)
 	port := config.GetEnv("APP_PORT", "3000")
-	log.Printf("Server berjalan di port %s", port)
-	log.Fatal(app.Listen(":" + port))
+
+	go func() {
+		if err := app.Listen(":" + port); err != nil {
+			logger.Error("server berhenti", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+	}()
+
+	logger.Info("server berjalan", slog.String("port", port))
+
+	// 5. Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logger.Info("sinyal berhenti diterima, menutup server")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := app.ShutdownWithContext(ctx); err != nil {
+		logger.Error("gagal menutup server dengan rapi", slog.String("error", err.Error()))
+	}
+
+	logger.Info("server berhenti dengan rapi")
 }
