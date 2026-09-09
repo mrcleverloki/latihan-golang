@@ -1,23 +1,24 @@
 # Pernyataan Penggunaan AI (AI-USAGE)
 
-Dokumen ini menjelaskan pemanfaatan kecerdasan buatan (Artificial Intelligence) dalam penyelesaian Tugas Praktikum Pertemuan 3 (Database & Repository Pattern).
+Dokumen ini menjelaskan pemanfaatan kecerdasan buatan (Artificial Intelligence) dalam penyelesaian Tugas Praktikum Pertemuan 4 (Clean Architecture).
 
 ## Alat AI yang Digunakan
 - **Model / Tools**: Google Gemini
 
 ## Rincian Bagian yang Dibantu oleh AI
-1. **Pemahaman Konsep Teori & Database Persistence**
-   - Diskusi konsep *connection pooling* (`pgxpool`), pencegahan *SQL injection* melalui query berparameter, serta pemindahan operasi filter, sorting, dan pagination dari memori ke basis data.
-2. **Perancangan Skema & Migrasi SQL**
-   - Panduan penyusunan berkas migrasi `001_create_students.sql`, pembuatan *unique index* pada `LOWER(nim)`, dan penambahan indeks pencarian pada `LOWER(name)`.
-3. **Scaffolding Pola Repository & Integrasi Layer**
-   - Pemisahan kontrak *interface* dan implementasi basis data pada `app/repository/student_repository.go`.
-   - Pemetaan *error* basis data (*unique constraint violation* 23505 dan `pgx.ErrNoRows`) menjadi *sentinel error* (`ErrNotFound`, `ErrDuplicate`) serta translasi status HTTP (404, 409, 503).
-   - Pengaturan batas waktu operasi database menggunakan `context.WithTimeout`.
+1. **Pemahaman Konsep Clean Architecture & Dependency Rule**
+   - Diskusi konsep empat layer Clean Architecture, aturan ketergantungan kode (*Dependency Rule*), serta mitigasi penyederhanaan arsitektur pada ekosistem Go dan Fiber.
+2. **Restrukturisasi Kode ke Struktur Baku**
+   - Panduan pemecahan *presenter* dan pembaca kueri ke dalam package `helper/`.
+   - Perancangan pemisahan *business rules* murni (`student_rules.go`) agar terisolasi dari framework Fiber dan basis data.
+   - Penyusunan pengujian otomatis (*unit test*) pada layer use case tanpa inisialisasi server.
+3. **Konfigurasi Logging & Middleware**
+   - Penerapan middleware global, validasi *Content-Type* (`RequireJSON`), dan *structured logger* (`slog`) dengan rotasi file log otomatis menggunakan `lumberjack`.
+   - Pembersihan titik masuk `main.go` sehingga murni menangani perakitan dependensi dan *graceful shutdown*.
 
 ## Bagian yang Dikerjakan Mandiri
-- Instalasi dan konfigurasi PostgreSQL serta Postgres.app pada macOS.
-- Penyesuaian struktur folder proyek dan pengelolaan variabel environment (`.env`).
-- Eksekusi migrasi tabel dan perakitan *dependency injection* pada `main.go`.
-- Pengujian langsung skenario endpoint API via Thunder Client serta pengambilan bukti tangkapan layar (*screenshot*).
+- Pengelolaan struktur folder proyek dan konfigurasi variabel lingkungan (`.env`).
+- Eksekusi kompilasi kode, perbaikan *type field* model, dan eksekusi pengujian otomatis `go test`.
+- Pengujian fungsional seluruh endpoint REST API menggunakan ekstensi Thunder Client di VS Code.
+- Audit pemeriksaan kebocoran layer (*layer leakage inspection*).
 - Pengelolaan riwayat *commit* Git bertahap dan penyusunan laporan akhir PDF.
