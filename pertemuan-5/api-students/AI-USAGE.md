@@ -1,24 +1,31 @@
-# Pernyataan Penggunaan AI (AI-USAGE)
+# Deklarasi Penggunaan AI (AI-USAGE)
 
-Dokumen ini menjelaskan pemanfaatan kecerdasan buatan (Artificial Intelligence) dalam penyelesaian Tugas Praktikum Pertemuan 4 (Clean Architecture).
+Sesuai dengan integritas akademik dan pedoman tugas praktikum, dokumen ini mencatat rincian transparansi penggunaan alat bantu kecerdasan buatan (Artificial Intelligence) selama penyelesaian proyek.
 
-## Alat AI yang Digunakan
-- **Model / Tools**: Google Gemini
+---
 
-## Rincian Bagian yang Dibantu oleh AI
-1. **Pemahaman Konsep Clean Architecture & Dependency Rule**
-   - Diskusi konsep empat layer Clean Architecture, aturan ketergantungan kode (*Dependency Rule*), serta mitigasi penyederhanaan arsitektur pada ekosistem Go dan Fiber.
-2. **Restrukturisasi Kode ke Struktur Baku**
-   - Panduan pemecahan *presenter* dan pembaca kueri ke dalam package `helper/`.
-   - Perancangan pemisahan *business rules* murni (`student_rules.go`) agar terisolasi dari framework Fiber dan basis data.
-   - Penyusunan pengujian otomatis (*unit test*) pada layer use case tanpa inisialisasi server.
-3. **Konfigurasi Logging & Middleware**
-   - Penerapan middleware global, validasi *Content-Type* (`RequireJSON`), dan *structured logger* (`slog`) dengan rotasi file log otomatis menggunakan `lumberjack`.
-   - Pembersihan titik masuk `main.go` sehingga murni menangani perakitan dependensi dan *graceful shutdown*.
+## 1. Alat Bantu yang Digunakan
+* **Nama Alat:** Gemini AI (Google)
+* **Model:** Gemini
+* **Media Akses:** Obrolan Interaktif Web
 
-## Bagian yang Dikerjakan Mandiri
-- Pengelolaan struktur folder proyek dan konfigurasi variabel lingkungan (`.env`).
-- Eksekusi kompilasi kode, perbaikan *type field* model, dan eksekusi pengujian otomatis `go test`.
-- Pengujian fungsional seluruh endpoint REST API menggunakan ekstensi Thunder Client di VS Code.
-- Audit pemeriksaan kebocoran layer (*layer leakage inspection*).
-- Pengelolaan riwayat *commit* Git bertahap dan penyusunan laporan akhir PDF.
+---
+
+## 2. Rincian Pemanfaatan Alat Bantu
+
+| Modul / Komponen | Bentuk Kontribusi AI | Tingkat Bantuan |
+| :--- | :--- | :--- |
+| **Helper & Security (`helper/`)** | Pembuatan boilerplate fungsi token JWT, hashing password (bcrypt), komputasi hash SHA-256 untuk refresh token, dan fungsi `VerifyDummyPassword`. | Sedang |
+| **Middleware (`middleware/`)** | Pembuatan logika parsing header Bearer token pada `RequireAuth` dan konfigurasi `LoginRateLimiter` Fiber. | Sedang |
+| **Routing & Wireup (`route/`, `main.go`)** | Penyusunan Dependency Injection dan pemetaan route auth/protected di Fiber. | Rendah |
+| **Skenario Pengujian** | Pemberian panduan langkah uji coba manual (payload JSON dan headers) pada Thunder Client. | Rendah |
+| **Penyusunan Dokumentasi** | Pembuatan draf narasi teknis untuk laporan praktikum (Bagian 1–5). | Sedang |
+
+---
+
+## 3. Pekerjaan Mandiri (Human Contribution)
+* Penulisan dan eksekusi skema DDL basis data (`users`, `refresh_tokens`) pada PostgreSQL.
+* Perakitan, review, dan penyesuaian logika bisnis pada layer `repository` dan `service`.
+* Eksekusi unit testing lokal dan verifikasi kelolosan uji (`go test`).
+* Pengujian manual seluruh skenario API melalui Thunder Client serta pengambilan tangkapan layar bukti respon HTTP.
+* Pengelolaan branching, commit bertahap (*micro-commits*), dan konfigurasi `.gitignore`.
