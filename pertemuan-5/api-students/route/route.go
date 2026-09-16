@@ -12,32 +12,53 @@ import (
 	"api-students/middleware"
 )
 
-// Register memetakan URL ke method pada service.
-func Register(app *fiber.App, pool *pgxpool.Pool, studentService *service.StudentService) {
-	api := app.Group("/api/v1")
-
-	api.Get("/health", healthCheck(pool))
-
-	students := api.Group("/students", middleware.RequireJSON)
-	students.Get("/", studentService.List)
-	students.Get("/:id", studentService.Get)
-	students.Post("/", studentService.Create)
-	students.Put("/:id", studentService.Replace)
-	students.Patch("/:id", studentService.Patch)
-	students.Delete("/:id", studentService.Delete)
+type Dependencies struct {
+	Pool           *pgxpool.Pool
+	JWT            *helper.JWTManager
+	StudentService *service.StudentService
+	AuthService    *service.AuthService
 }
 
-// healthCheck melaporkan kondisi layanan beserta databasenya.
+func Register(app *fiber.App, deps Dependencies) {
+	api := app.Group("/api/v1")
+
+	// 1. Endpoint publik
+	api.Get("/health", healthCheck(deps.Pool))
+
+	// 2. Endpoint autentikasi
+	auth := api.Group("/auth", middleware.RequireJSON)
+	auth.Post("/register", deps.AuthService.Register)
+	auth.Post("/login", middleware.LoginRateLimiter(), deps.AuthService.Login)
+	auth.Post("/refresh", deps.AuthService.Refresh)
+	auth.Post("/logout", deps.AuthService.Logout)
+	auth.Get("/me", middleware.RequireAuth(deps.JWT), deps.AuthService.Me)
+
+	// 3. Endpoint students (terlindungi token JWT)
+	students := api.Group("/students",
+		middleware.RequireJSON,
+		middleware.RequireAuth(deps.JWT),
+	)
+	students.Get("/", deps.StudentService.List)
+	students.Get("/:id", deps.StudentService.Get)
+	students.Post("/", deps.StudentService.Create)
+	students.Put("/:id", deps.StudentService.Replace)
+	students.Patch("/:id", deps.StudentService.Patch)
+	students.Delete("/:id", deps.StudentService.Delete)
+}
+
 func healthCheck(pool *pgxpool.Pool) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		ctx, cancel := context.WithTimeout(c.UserContext(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
 		defer cancel()
 
+		dbStatus := "connected"
 		if err := pool.Ping(ctx); err != nil {
-			return helper.Fail(c, fiber.StatusServiceUnavailable,
-				"database tidak dapat dihubungi")
+			dbStatus = "disconnected"
 		}
 
-		return helper.Success(c, fiber.StatusOK, "server dan database berjalan", nil)
+		return helper.Success(c, fiber.StatusOK, "layanan berjalan normal", fiber.Map{
+			"status":   "ok",
+			"database": dbStatus,
+		})
 	}
 }

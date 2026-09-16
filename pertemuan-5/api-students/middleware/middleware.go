@@ -15,12 +15,25 @@ import (
 )
 
 // Register memasang seluruh middleware yang berlaku untuk semua route.
-func Register(app *fiber.App, logger *slog.Logger) {
+func Register(app *fiber.App, logger *slog.Logger, allowedOrigins string) {
 	app.Use(requestid.New())       // 1. beri setiap request satu ID unik
 	app.Use(recover.New())         // 2. tangkap panic agar server tidak mati
 	app.Use(helmet.New())          // 3. pasang header keamanan dasar
-	app.Use(cors.New())            // 4. atur Cross-Origin Resource Sharing
+	app.Use(corsPolicy(allowedOrigins)) // 4. batasi origin dan header Authorization
 	app.Use(RequestLogger(logger)) // 5. catat setiap request
+}
+
+// corsPolicy membatasi origin yang boleh memanggil API dan mengizinkan header Authorization.
+func corsPolicy(allowedOrigins string) fiber.Handler {
+	if strings.TrimSpace(allowedOrigins) == "" {
+		allowedOrigins = "http://localhost:5173"
+	}
+
+	return cors.New(cors.Config{
+		AllowOrigins: allowedOrigins,
+		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
+	})
 }
 
 // RequestLogger mencatat setiap request ke log terstruktur.

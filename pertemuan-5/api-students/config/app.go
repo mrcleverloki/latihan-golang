@@ -4,25 +4,24 @@ import (
 	"log/slog"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/jackc/pgx/v5/pgxpool"
 
-	"api-students/app/service"
 	"api-students/helper"
 	"api-students/middleware"
 	"api-students/route"
 )
 
 // NewApp merakit seluruh komponen aplikasi
-func NewApp(
-	logger *slog.Logger, pool *pgxpool.Pool, studentService *service.StudentService,
-) *fiber.App {
+func NewApp(logger *slog.Logger, deps route.Dependencies) *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName:      GetEnv("APP_NAME", "Praktikum Backend Lanjut"),
 		ErrorHandler: newErrorHandler(logger),
+
+		// Membatasi ukuran body request maksimal 1 MB
+		BodyLimit: 1 * 1024 * 1024,
 	})
 
-	middleware.Register(app, logger)
-	route.Register(app, pool, studentService)
+	middleware.Register(app, logger, GetEnv("ALLOWED_ORIGINS", ""))
+	route.Register(app, deps)
 
 	// Penampung terakhir untuk URL yang tidak dikenal (404)
 	app.Use(func(c *fiber.Ctx) error {

@@ -12,6 +12,8 @@ import (
 	"api-students/app/service"
 	"api-students/config"
 	"api-students/database"
+	"api-students/helper"
+	"api-students/route"
 )
 
 func main() {
@@ -27,12 +29,30 @@ func main() {
 	}
 	defer pool.Close()
 
-	// 3. Dependency Injection: Repository -> Service
+	// 3. Konfigurasi Auth & JWT
+	jwtSecret := config.GetEnv("JWT_SECRET", "kunci-rahasia-minimal-32-karakter-harus-aman-banget")
+	jwtIssuer := config.GetEnv("JWT_ISSUER", "api-students")
+	accessTTL := 15 * time.Minute
+	refreshTTL := 7 * 24 * time.Hour
+
+	jwtManager := helper.NewJWTManager(jwtSecret, jwtIssuer, accessTTL)
+
+	// 4. Dependency Injection: Repository -> Service
 	studentRepo := repository.NewStudentRepository(pool)
 	studentService := service.NewStudentService(studentRepo)
 
-	// 4. Inisialisasi App
-	app := config.NewApp(logger, pool, studentService)
+	userRepo := repository.NewUserRepository(pool)
+	tokenRepo := repository.NewTokenRepository(pool)
+	authService := service.NewAuthService(userRepo, tokenRepo, jwtManager, refreshTTL)
+
+	// 5. Inisialisasi App dengan Dependencies
+	deps := route.Dependencies{
+		Pool:           pool,
+		JWT:            jwtManager,
+		StudentService: studentService,
+		AuthService:    authService,
+	}
+	app := config.NewApp(logger, deps)
 	port := config.GetEnv("APP_PORT", "3000")
 
 	go func() {
@@ -44,7 +64,7 @@ func main() {
 
 	logger.Info("server berjalan", slog.String("port", port))
 
-	// 5. Graceful shutdown
+	// 6. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
