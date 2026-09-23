@@ -37,18 +37,30 @@ func main() {
 
 	jwtManager := helper.NewJWTManager(jwtSecret, jwtIssuer, accessTTL)
 
-	// 4. Dependency Injection: Repository -> Service
+	// 4. Dependency Injection: Repository
 	studentRepo := repository.NewStudentRepository(pool)
-	studentService := service.NewStudentService(studentRepo)
-
 	userRepo := repository.NewUserRepository(pool)
 	tokenRepo := repository.NewTokenRepository(pool)
-	authService := service.NewAuthService(userRepo, tokenRepo, jwtManager, refreshTTL)
+	roleRepo := repository.NewRoleRepository(pool)
 
-	// 5. Inisialisasi App dengan Dependencies
+	// 5. Muat Role Permissions dari DB (Fail Closed)
+	rawPermissions, err := roleRepo.LoadPermissions(context.Background())
+	if err != nil {
+		logger.Error("gagal memuat permission", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	perms := helper.NewPermissionSet(rawPermissions)
+	logger.Info("permission dimuat", slog.Any("roles", perms.KnownRoles()))
+
+	// 6. Services
+	studentService := service.NewStudentService(studentRepo)
+	authService := service.NewAuthService(userRepo, tokenRepo, jwtManager, perms, refreshTTL)
+
+	// 7. Inisialisasi App dengan Dependencies
 	deps := route.Dependencies{
 		Pool:           pool,
 		JWT:            jwtManager,
+		Permissions:    perms,
 		StudentService: studentService,
 		AuthService:    authService,
 	}
@@ -64,7 +76,7 @@ func main() {
 
 	logger.Info("server berjalan", slog.String("port", port))
 
-	// 6. Graceful shutdown
+	// 8. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
