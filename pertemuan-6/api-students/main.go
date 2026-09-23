@@ -52,8 +52,8 @@ func main() {
 	perms := helper.NewPermissionSet(rawPermissions)
 	logger.Info("permission dimuat", slog.Any("roles", perms.KnownRoles()))
 
-	// 6. Services
-	studentService := service.NewStudentService(studentRepo)
+	// 6. Services (Injeksi perms ke StudentService dan AuthService)
+	studentService := service.NewStudentService(studentRepo, perms)
 	authService := service.NewAuthService(userRepo, tokenRepo, jwtManager, perms, refreshTTL)
 
 	// 7. Inisialisasi App dengan Dependencies
