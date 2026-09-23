@@ -34,17 +34,23 @@ func Register(app *fiber.App, deps Dependencies) {
 	auth.Post("/logout", deps.AuthService.Logout)
 	auth.Get("/me", middleware.RequireAuth(deps.JWT), deps.AuthService.Me)
 
-	// 3. Endpoint students (terlindungi token JWT)
+	// 3. Endpoint students (terlindungi token JWT dan RBAC)
 	students := api.Group("/students",
 		middleware.RequireJSON,
 		middleware.RequireAuth(deps.JWT),
 	)
-	students.Get("/", deps.StudentService.List)
+
+	// List dan Create menggunakan RBAC middleware
+	students.Get("/", middleware.RequirePermission(deps.Permissions, "student:list"), deps.StudentService.List)
+	students.Post("/", middleware.RequirePermission(deps.Permissions, "student:create"), deps.StudentService.Create)
+
+	// Get, Replace, Patch mengandalkan ownership/role check di service layer
 	students.Get("/:id", deps.StudentService.Get)
-	students.Post("/", deps.StudentService.Create)
 	students.Put("/:id", deps.StudentService.Replace)
 	students.Patch("/:id", deps.StudentService.Patch)
-	students.Delete("/:id", deps.StudentService.Delete)
+
+	// Delete menggunakan RBAC middleware
+	students.Delete("/:id", middleware.RequirePermission(deps.Permissions, "student:delete"), deps.StudentService.Delete)
 }
 
 func healthCheck(pool *pgxpool.Pool) fiber.Handler {
