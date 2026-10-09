@@ -50,3 +50,12 @@ func FailValidation(c *fiber.Ctx, errs map[string]string) error {
 		Errors:  errs,
 	})
 }
+// SuccessCursor membentuk response sukses dengan cursor pagination
+func SuccessCursor(c *fiber.Ctx, message string, data any, meta *model.CursorMeta) error {
+	return c.Status(fiber.StatusOK).JSON(model.WebResponse{
+		Success: true,
+		Message: message,
+		Data:    data,
+		Meta:    meta,
+	})
+}
