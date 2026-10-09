@@ -11,28 +11,18 @@ import (
 	"api-students/app/model"
 )
 
-// Sentinel error untuk diterjemahkan oleh handler
 var (
 	ErrNotFound  = errors.New("data mahasiswa tidak ditemukan")
 	ErrDuplicate = errors.New("NIM mahasiswa sudah terdaftar")
 )
 
-// StudentRepository adalah kontrak penyimpanan data mahasiswa
 type StudentRepository interface {
 	FindAll(ctx context.Context, q model.ListQuery) ([]model.Student, int, error)
+	FindAfterCursor(ctx context.Context, q model.CursorQuery) ([]model.Student, error)
 	FindByID(ctx context.Context, id int) (model.Student, error)
 	Create(ctx context.Context, s model.Student) (model.Student, error)
 	Update(ctx context.Context, s model.Student) (model.Student, error)
 	Delete(ctx context.Context, id int) error
-}
-
-// Whitelist kolom untuk mencegah SQL Injection pada klausa ORDER BY
-var kolomUrutStudent = map[string]string{
-	"id":         "id",
-	"nim":        "nim",
-	"name":       "name",
-	"grade":      "grade",
-	"created_at": "created_at",
 }
 
 type studentPostgresRepository struct {
@@ -43,8 +33,59 @@ func NewStudentRepository(pool *pgxpool.Pool) StudentRepository {
 	return &studentPostgresRepository{pool: pool}
 }
 
-// buildFilter menyusun klausa WHERE dinamis dan argumen berparameter
-func buildStudentFilter(q model.ListQuery) (string, []any) {
+// PERBAIKAN BUG #7: Keyset pagination wajib ORDER BY created_at DESC, id DESC
+func (r *studentPostgresRepository) FindAfterCursor(ctx context.Context, q model.CursorQuery) ([]model.Student, error) {
+	args := []any{}
+	where := " WHERE 1 = 1"
+
+	if q.Search != "" {
+		args = append(args, "%"+q.Search+"%", "%"+q.Search+"%")
+		where += fmt.Sprintf(" AND (name ILIKE $%d OR nim ILIKE $%d)", len(args)-1, len(args))
+	}
+
+	if q.IsActive != nil {
+		args = append(args, *q.IsActive)
+		where += fmt.Sprintf(" AND is_active = $%d", len(args))
+	}
+
+	if q.After != nil {
+		args = append(args, q.After.CreatedAt, q.After.ID)
+		where += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(args)-1, len(args))
+	}
+
+	// Minta limit + 1 untuk deteksi hasMore
+	args = append(args, q.Limit+1)
+	query := fmt.Sprintf(`
+		SELECT id, nim, name, grade, is_active, owner_id, created_at 
+		FROM students%s 
+		ORDER BY created_at DESC, id DESC 
+		LIMIT $%d`,
+		where, len(args),
+	)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("mengambil daftar mahasiswa keyset: %w", err)
+	}
+	defer rows.Close()
+
+	result := []model.Student{}
+	for rows.Next() {
+		var s model.Student
+		if err := rows.Scan(&s.ID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.OwnerID, &s.CreatedAt); err != nil {
+			return nil, fmt.Errorf("membaca baris mahasiswa: %w", err)
+		}
+		result = append(result, s)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterasi baris mahasiswa: %w", err)
+	}
+
+	return result, nil
+}
+
+func (r *studentPostgresRepository) FindAll(ctx context.Context, q model.ListQuery) ([]model.Student, int, error) {
 	where := " WHERE 1=1"
 	args := []any{}
 
@@ -58,34 +99,18 @@ func buildStudentFilter(q model.ListQuery) (string, []any) {
 		args = append(args, *q.IsActive)
 	}
 
-	return where, args
-}
-
-func (r *studentPostgresRepository) FindAll(ctx context.Context, q model.ListQuery) ([]model.Student, int, error) {
-	where, args := buildStudentFilter(q)
-
 	var total int
 	err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM students"+where, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("menghitung total mahasiswa: %w", err)
 	}
 
-	kolom, ok := kolomUrutStudent[q.Sort]
-	if !ok {
-		kolom = "id"
-	}
-
-	arah := "ASC"
-	if q.Order == "desc" {
-		arah = "DESC"
-	}
-
 	sqlText := fmt.Sprintf(`
 		SELECT id, nim, name, grade, is_active, owner_id, created_at
 		FROM students%s
-		ORDER BY %s %s
+		ORDER BY created_at DESC, id DESC
 		LIMIT $%d OFFSET $%d`,
-		where, kolom, arah, len(args)+1, len(args)+2,
+		where, len(args)+1, len(args)+2,
 	)
 	args = append(args, q.Limit, q.Offset())
 
@@ -182,7 +207,6 @@ func (r *studentPostgresRepository) Delete(ctx context.Context, id int) error {
 	return nil
 }
 
-// isUniqueViolation mendeteksi error PostgreSQL 23505 (unique violation)
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
