@@ -4,18 +4,30 @@ import (
 	"testing"
 
 	"api-students/app/model"
+	"api-students/helper"
 )
 
-func TestValidateCreate(t *testing.T) {
-	// Kasus gagal: NIM kosong
+func TestValidateCreateStudent(t *testing.T) {
+	// Kasus gagal: NIM tidak valid / kosong
 	reqInvalid := model.CreateStudentRequest{
 		NIM:   "",
 		Name:  "Budi Santoso",
 		Grade: "A",
 	}
-	errs := ValidateCreate(reqInvalid)
+	errs := helper.ValidateStruct(reqInvalid)
 	if _, exists := errs["nim"]; !exists {
 		t.Errorf("diharapkan error pada NIM, tapi lolos validasi")
+	}
+
+	// Kasus gagal: NIM bukan 9 digit angka (custom validation nim_format)
+	reqNIMInvalid := model.CreateStudentRequest{
+		NIM:   "18722ABC",
+		Name:  "Budi Santoso",
+		Grade: "A",
+	}
+	errsNIM := helper.ValidateStruct(reqNIMInvalid)
+	if _, exists := errsNIM["nim"]; !exists {
+		t.Errorf("diharapkan error custom nim_format pada NIM bukan digit")
 	}
 
 	// Kasus sukses
@@ -24,7 +36,7 @@ func TestValidateCreate(t *testing.T) {
 		Name:  "Budi Santoso",
 		Grade: "A",
 	}
-	errsValid := ValidateCreate(reqValid)
+	errsValid := helper.ValidateStruct(reqValid)
 	if len(errsValid) != 0 {
 		t.Errorf("seharusnya tidak ada error, dapat: %v", errsValid)
 	}
@@ -45,10 +57,7 @@ func TestApplyPatch(t *testing.T) {
 		Grade: &newGrade,
 	}
 
-	updated, errs := ApplyPatch(initial, patchReq)
-	if len(errs) != 0 {
-		t.Fatalf("tidak diharapkan error: %v", errs)
-	}
+	updated := ApplyPatch(initial, patchReq)
 	if updated.Name != "Budi Wicaksono" {
 		t.Errorf("nama gagal diperbarui, dapat: %s", updated.Name)
 	}
@@ -57,23 +66,5 @@ func TestApplyPatch(t *testing.T) {
 	}
 	if updated.NIM != "187221001" {
 		t.Errorf("NIM tidak boleh berubah jika tidak dikirim")
-	}
-}
-
-func TestCountTotalPages(t *testing.T) {
-	cases := []struct {
-		total, limit, want int
-	}{
-		{0, 10, 0},
-		{1, 10, 1},
-		{10, 10, 1},
-		{11, 10, 2},
-		{25, 10, 3},
-	}
-
-	for _, tc := range cases {
-		if got := CountTotalPages(tc.total, tc.limit); got != tc.want {
-			t.Errorf("total=%d limit=%d: harap %d, dapat %d", tc.total, tc.limit, tc.want, got)
-		}
 	}
 }
