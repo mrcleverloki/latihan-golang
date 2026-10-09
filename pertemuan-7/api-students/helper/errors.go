@@ -90,3 +90,10 @@ func Internal(cause error) *AppError {
 		cause:   cause,
 	}
 }
+func TooManyRequests(message string) *AppError {
+	return &AppError{
+		Status:  fiber.StatusTooManyRequests,
+		Code:    CodeTooManyRequests,
+		Message: message,
+	}
+}
