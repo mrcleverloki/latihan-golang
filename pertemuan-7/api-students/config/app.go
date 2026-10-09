@@ -1,10 +1,12 @@
 package config
 
 import (
+	"errors"
 	"log/slog"
 
 	"github.com/gofiber/fiber/v2"
 
+	"api-students/app/model"
 	"api-students/helper"
 	"api-students/middleware"
 	"api-students/route"
@@ -25,7 +27,7 @@ func NewApp(logger *slog.Logger, deps route.Dependencies) *fiber.App {
 
 	// Penampung terakhir untuk URL yang tidak dikenal (404)
 	app.Use(func(c *fiber.Ctx) error {
-		return helper.Fail(c, fiber.StatusNotFound, "endpoint tidak ditemukan")
+		return helper.NotFound("endpoint tidak ditemukan")
 	})
 
 	return app
@@ -33,20 +35,64 @@ func NewApp(logger *slog.Logger, deps route.Dependencies) *fiber.App {
 
 func newErrorHandler(logger *slog.Logger) fiber.ErrorHandler {
 	return func(c *fiber.Ctx, err error) error {
-		status := fiber.StatusInternalServerError
-		message := "terjadi error pada server"
+		requestID, _ := c.Locals("requestid").(string)
 
-		if e, ok := err.(*fiber.Error); ok {
-			status = e.Code
-			message = e.Message
+		var appErr *helper.AppError
+
+		switch {
+		case errors.As(err, &appErr):
+			// Kegagalan yang sudah kita rencanakan.
+
+		case errors.Is(err, fiber.ErrRequestEntityTooLarge):
+			appErr = &helper.AppError{
+				Status:  fiber.StatusRequestEntityTooLarge,
+				Code:    "PAYLOAD_TOO_LARGE",
+				Message: "ukuran body melebihi batas yang diizinkan",
+			}
+
+		default:
+			// Kegagalan yang tidak kita duga.
+			var fiberErr *fiber.Error
+			if errors.As(err, &fiberErr) {
+				appErr = &helper.AppError{
+					Status:  fiberErr.Code,
+					Code:    "HTTP_ERROR",
+					Message: fiberErr.Message,
+				}
+			} else {
+				appErr = helper.Internal(err)
+			}
 		}
 
-		logger.Error("unhandled_error",
-			slog.String("path", c.Path()),
-			slog.Int("status", status),
-			slog.String("error", err.Error()),
-		)
+		// PERBAIKAN BUG #1: 5xx dicatat ERROR, 4xx dicatat WARN.
+		// cause di-unwrap agar tidak panic bila nil.
+		if appErr.Status >= fiber.StatusInternalServerError {
+			errStr := ""
+			if appErr.Unwrap() != nil {
+				errStr = appErr.Unwrap().Error()
+			}
+			logger.Error("request_failed",
+				slog.String("request_id", requestID),
+				slog.String("path", c.Path()),
+				slog.String("code", appErr.Code),
+				slog.Int("status", appErr.Status),
+				slog.String("error", errStr),
+			)
+		} else {
+			logger.Warn("request_rejected",
+				slog.String("request_id", requestID),
+				slog.String("path", c.Path()),
+				slog.String("code", appErr.Code),
+				slog.Int("status", appErr.Status),
+			)
+		}
 
-		return helper.Fail(c, status, message)
+		return c.Status(appErr.Status).JSON(model.ErrorResponse{
+			Success:   false,
+			Code:      appErr.Code,
+			Message:   appErr.Message,
+			Fields:    appErr.Fields,
+			RequestID: requestID,
+		})
 	}
 }

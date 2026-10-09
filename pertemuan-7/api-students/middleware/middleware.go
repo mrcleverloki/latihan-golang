@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -16,11 +17,11 @@ import (
 
 // Register memasang seluruh middleware yang berlaku untuk semua route.
 func Register(app *fiber.App, logger *slog.Logger, allowedOrigins string) {
-	app.Use(requestid.New())       // 1. beri setiap request satu ID unik
-	app.Use(recover.New())         // 2. tangkap panic agar server tidak mati
-	app.Use(helmet.New())          // 3. pasang header keamanan dasar
+	app.Use(requestid.New())            // 1. beri setiap request satu ID unik
+	app.Use(recover.New())              // 2. tangkap panic agar server tidak mati
+	app.Use(helmet.New())               // 3. pasang header keamanan dasar
 	app.Use(corsPolicy(allowedOrigins)) // 4. batasi origin dan header Authorization
-	app.Use(RequestLogger(logger)) // 5. catat setiap request
+	app.Use(RequestLogger(logger))      // 5. catat setiap request
 }
 
 // corsPolicy membatasi origin yang boleh memanggil API dan mengizinkan header Authorization.
@@ -45,11 +46,27 @@ func RequestLogger(logger *slog.Logger) fiber.Handler {
 
 		requestID, _ := c.Locals("requestid").(string)
 
+		// PERBAIKAN BUG #8: Hitung status dari error bila ErrorHandler belum berjalan
+		status := c.Response().StatusCode()
+		if err != nil {
+			var appErr *helper.AppError
+			if errors.As(err, &appErr) {
+				status = appErr.Status
+			} else {
+				var fiberErr *fiber.Error
+				if errors.As(err, &fiberErr) {
+					status = fiberErr.Code
+				} else {
+					status = fiber.StatusInternalServerError
+				}
+			}
+		}
+
 		logger.Info("http_request",
 			slog.String("request_id", requestID),
 			slog.String("method", c.Method()),
 			slog.String("path", c.Path()),
-			slog.Int("status", c.Response().StatusCode()),
+			slog.Int("status", status), // Menggunakan variabel status yang benar
 			slog.Duration("duration", time.Since(start)),
 			slog.String("ip", c.IP()),
 		)
@@ -69,8 +86,7 @@ func RequireJSON(c *fiber.Ctx) error {
 	if methodsWithBody[c.Method()] {
 		ct := c.Get("Content-Type")
 		if !strings.HasPrefix(ct, fiber.MIMEApplicationJSON) {
-			return helper.Fail(c, fiber.StatusUnsupportedMediaType,
-				"Content-Type harus application/json")
+			return helper.UnsupportedMediaType("Content-Type harus application/json")
 		}
 	}
 	return c.Next()
