@@ -32,6 +32,7 @@ type CourseRepository interface {
 	DecrementEnrolled(ctx context.Context, courseID int) (model.Course, error)
 	InsertEnrollment(ctx context.Context, courseID, userID int) error
 	DeleteEnrollment(ctx context.Context, courseID, userID int) error
+	IsEnrolled(ctx context.Context, courseID, userID int) (bool, error)
 
 	UpdateQuota(ctx context.Context, id, quota, version int) (model.Course, error)
 }
@@ -227,4 +228,13 @@ func (r *coursePostgresRepository) UpdateQuota(ctx context.Context, id, quota, v
 		return model.Course{}, ErrVersionConflict
 	}
 	return model.Course{}, ErrQuotaBelowFilled
+}
+
+func (r *coursePostgresRepository) IsEnrolled(ctx context.Context, courseID, userID int) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM enrollments WHERE course_id = $1 AND user_id = $2)`, courseID, userID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("memeriksa enrollment: %w", err)
+	}
+	return exists, nil
 }
