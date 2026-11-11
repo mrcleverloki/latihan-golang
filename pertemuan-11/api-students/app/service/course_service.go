@@ -15,11 +15,16 @@ var errCreditLimit = errors.New("batas SKS terlampaui")
 
 type CourseService struct {
 	courses repository.CourseRepository
+	outbox  repository.OutboxRepository
 	tx      *repository.TxManager
 }
 
-func NewCourseService(courses repository.CourseRepository, tx *repository.TxManager) *CourseService {
-	return &CourseService{courses: courses, tx: tx}
+func NewCourseService(
+	courses repository.CourseRepository,
+	outbox repository.OutboxRepository,
+	tx *repository.TxManager,
+) *CourseService {
+	return &CourseService{courses: courses, outbox: outbox, tx: tx}
 }
 
 // ---------- GET /courses ----------
@@ -101,7 +106,7 @@ func (s *CourseService) Enroll(c *fiber.Ctx) error {
 	err := s.tx.WithTx(ctx, func(tx repository.DBTX) error {
 		repo := s.courses.WithTx(tx)
 
-		// 1. Kunci data mahasiswa (pessimistic lock) agar request serentak dari user sama antre
+		// 1. Kunci data mahasiswa (pessimistic lock)
 		if err := repo.LockStudent(ctx, current.UserID); err != nil {
 			return err
 		}
@@ -119,13 +124,23 @@ func (s *CourseService) Enroll(c *fiber.Ctx) error {
 			return errCreditLimit
 		}
 
-		// 3. Ambil kursi secara atomik (UPDATE WHERE enrolled_count < quota)
+		// 3. Ambil kursi secara atomik
 		enrolled, err = repo.IncrementEnrolled(ctx, courseID)
 		if err != nil {
 			return err
 		}
 
-		// 4. Catat pendaftaran (jika duplikat, rollback membatalkan penambahan kursi langkah 3)
+		// 4. Catat event ke outbox memakai transaksi yang sama (Perbaikan Puzzle #2)
+		if err := s.outbox.WithTx(tx).Insert(ctx, model.EventEnrollmentCreated, model.EnrollmentEvent{
+			UserID:     current.UserID,
+			CourseID:   enrolled.ID,
+			CourseCode: enrolled.Code,
+			CourseName: enrolled.Name,
+		}); err != nil {
+			return err
+		}
+
+		// 5. Catat pendaftaran
 		return repo.InsertEnrollment(ctx, courseID, current.UserID)
 	})
 	if err != nil {
@@ -161,8 +176,18 @@ func (s *CourseService) Drop(c *fiber.Ctx) error {
 		if err := repo.DeleteEnrollment(ctx, courseID, current.UserID); err != nil {
 			return err
 		}
-		_, err := repo.DecrementEnrolled(ctx, courseID)
-		return err
+		course, err := repo.DecrementEnrolled(ctx, courseID)
+		if err != nil {
+			return err
+		}
+
+		// Catat event drop ke outbox memakai EventEnrollmentDropped (Perbaikan Puzzle #3)
+		return s.outbox.WithTx(tx).Insert(ctx, model.EventEnrollmentDropped, model.EnrollmentEvent{
+			UserID:     current.UserID,
+			CourseID:   course.ID,
+			CourseCode: course.Code,
+			CourseName: course.Name,
+		})
 	})
 	if err != nil {
 		return translateCourseError(err)
@@ -204,7 +229,6 @@ func (s *CourseService) Swap(c *fiber.Ctx) error {
 			return err
 		}
 
-		// Kunci kedua kelas secara terurut (menghindari deadlock)
 		if err := repo.LockCourses(ctx, req.FromCourseID, req.ToCourseID); err != nil {
 			return err
 		}
@@ -229,7 +253,6 @@ func (s *CourseService) Swap(c *fiber.Ctx) error {
 			return err
 		}
 
-		// BUG FIX 6: Gunakan repo.DecrementEnrolled, BUKAN s.courses.DecrementEnrolled!
 		if _, err := repo.DecrementEnrolled(ctx, req.FromCourseID); err != nil {
 			return err
 		}
@@ -238,7 +261,19 @@ func (s *CourseService) Swap(c *fiber.Ctx) error {
 		if err != nil {
 			return err
 		}
-		return repo.InsertEnrollment(ctx, req.ToCourseID, current.UserID)
+		if err := repo.InsertEnrollment(ctx, req.ToCourseID, current.UserID); err != nil {
+			return err
+		}
+
+		// Catat event swap ke outbox
+		return s.outbox.WithTx(tx).Insert(ctx, model.EventEnrollmentSwapped, model.EnrollmentEvent{
+			UserID:         current.UserID,
+			CourseID:       to.ID,
+			CourseCode:     to.Code,
+			CourseName:     to.Name,
+			FromCourseCode: from.Code,
+			FromCourseName: from.Name,
+		})
 	})
 	if err != nil {
 		return translateCourseError(err)
@@ -266,7 +301,6 @@ func (s *CourseService) UpdateQuota(c *fiber.Ctx) error {
 		return helper.Validation(errs)
 	}
 
-	// Update tunggal PostgreSQL sudah atomik, menggunakan optimistic locking via column version
 	updated, err := s.courses.UpdateQuota(ctx, id, req.Quota, req.Version)
 	if err != nil {
 		return translateCourseError(err)
