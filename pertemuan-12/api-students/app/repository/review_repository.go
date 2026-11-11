@@ -29,6 +29,52 @@ type reviewRepository struct {
 	coll *mongo.Collection
 }
 
+type replyEntity struct {
+	ID        bson.ObjectID `bson:"_id,omitempty"`
+	UserID    int           `bson:"user_id"`
+	Comment   string        `bson:"comment"`
+	CreatedAt time.Time     `bson:"created_at"`
+}
+
+type reviewEntity struct {
+	ID        bson.ObjectID `bson:"_id,omitempty"`
+	CourseID  int           `bson:"course_id"`
+	UserID    int           `bson:"user_id"`
+	Rating    int           `bson:"rating"`
+	Comment   string        `bson:"comment"`
+	Tags      []string      `bson:"tags"`
+	Replies   []replyEntity `bson:"replies"`
+	CreatedAt time.Time     `bson:"created_at"`
+	UpdatedAt time.Time     `bson:"updated_at"`
+}
+
+func toReviewModel(e reviewEntity) model.Review {
+	var replies []model.Reply
+	if len(e.Replies) > 0 {
+		replies = make([]model.Reply, len(e.Replies))
+		for i, rep := range e.Replies {
+			replies[i] = model.Reply{
+				ID:        rep.ID.Hex(),
+				UserID:    rep.UserID,
+				Comment:   rep.Comment,
+				CreatedAt: rep.CreatedAt,
+			}
+		}
+	}
+
+	return model.Review{
+		ID:        e.ID.Hex(),
+		CourseID:  e.CourseID,
+		UserID:    e.UserID,
+		Rating:    e.Rating,
+		Comment:   e.Comment,
+		Tags:      e.Tags,
+		Replies:   replies,
+		CreatedAt: e.CreatedAt,
+		UpdatedAt: e.UpdatedAt,
+	}
+}
+
 func NewReviewRepository(db *mongo.Database) ReviewRepository {
 	return &reviewRepository{
 		coll: db.Collection("reviews"),
@@ -36,7 +82,6 @@ func NewReviewRepository(db *mongo.Database) ReviewRepository {
 }
 
 func (r *reviewRepository) EnsureIndexes(ctx context.Context) error {
-	// Unique compound index: satu user hanya boleh memberi 1 review per course
 	indexModel := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "course_id", Value: 1},
@@ -78,12 +123,14 @@ func (r *reviewRepository) FindByCourse(ctx context.Context, courseID int) ([]mo
 	}
 	defer cursor.Close(ctx)
 
-	var reviews []model.Review
-	if err := cursor.All(ctx, &reviews); err != nil {
+	var entities []reviewEntity
+	if err := cursor.All(ctx, &entities); err != nil {
 		return nil, err
 	}
-	if reviews == nil {
-		reviews = []model.Review{}
+
+	reviews := make([]model.Review, 0, len(entities))
+	for _, e := range entities {
+		reviews = append(reviews, toReviewModel(e))
 	}
 
 	return reviews, nil
