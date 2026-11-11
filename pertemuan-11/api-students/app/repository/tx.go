@@ -64,3 +64,10 @@ func isRetryable(err error) bool {
 	code := pgErrorCode(err)
 	return code == codeSerializationFailure || code == codeDeadlockDetected
 }
+
+// WithTxOnce sama dengan WithTx, tetapi TIDAK PERNAH melakukan retry.
+// Dipakai ketika fn melakukan sesuatu di luar database (kirim email, enqueue task)
+// sambil memegang lock/claim di database.
+func (m *TxManager) WithTxOnce(ctx context.Context, fn func(tx DBTX) error) error {
+	return m.runOnce(ctx, fn)
+}
