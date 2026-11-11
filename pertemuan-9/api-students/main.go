@@ -42,6 +42,7 @@ func main() {
 	userRepo := repository.NewUserRepository(pool)
 	tokenRepo := repository.NewTokenRepository(pool)
 	roleRepo := repository.NewRoleRepository(pool)
+	courseRepo := repository.NewCourseRepository(pool)
 
 	// 5. Muat Role Permissions dari DB (Fail Closed)
 	rawPermissions, err := roleRepo.LoadPermissions(context.Background())
@@ -52,9 +53,10 @@ func main() {
 	perms := helper.NewPermissionSet(rawPermissions)
 	logger.Info("permission dimuat", slog.Any("roles", perms.KnownRoles()))
 
-	// 6. Services (Injeksi perms ke StudentService dan AuthService)
+	// 6. Services
 	studentService := service.NewStudentService(studentRepo, perms)
 	authService := service.NewAuthService(userRepo, tokenRepo, jwtManager, perms, refreshTTL)
+	courseService := service.NewCourseService(courseRepo)
 
 	// 7. Inisialisasi App dengan Dependencies
 	deps := route.Dependencies{
@@ -63,6 +65,7 @@ func main() {
 		Permissions:    perms,
 		StudentService: studentService,
 		AuthService:    authService,
+		CourseService:  courseService,
 	}
 	app := config.NewApp(logger, deps)
 	port := config.GetEnv("APP_PORT", "3000")

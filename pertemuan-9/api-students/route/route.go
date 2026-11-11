@@ -18,6 +18,7 @@ type Dependencies struct {
 	Permissions    *helper.PermissionSet
 	StudentService *service.StudentService
 	AuthService    *service.AuthService
+	CourseService  *service.CourseService
 }
 
 func Register(app *fiber.App, deps Dependencies) {
@@ -51,6 +52,18 @@ func Register(app *fiber.App, deps Dependencies) {
 
 	// Delete menggunakan RBAC middleware
 	students.Delete("/:id", middleware.RequirePermission(deps.Permissions, "student:delete"), deps.StudentService.Delete)
+
+	// 4. Endpoint kelas dan KRS
+	courses := api.Group("/courses",
+		middleware.RequireJSON,
+		middleware.RequireAuth(deps.JWT),
+	)
+
+	// "/mine" didaftarkan SEBELUM "/:id". Fiber mencocokkan route sesuai
+	// urutan pendaftaran; bila dibalik, "mine" akan dianggap sebagai :id.
+	courses.Get("/", deps.CourseService.List)
+	courses.Get("/mine", deps.CourseService.Mine)
+	courses.Get("/:id", deps.CourseService.Get)
 }
 
 func healthCheck(pool *pgxpool.Pool) fiber.Handler {
