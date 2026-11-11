@@ -1,95 +1,84 @@
-# Praktikum Pemrograman Backend - Pertemuan 7: Advanced API Design
+# Praktikum Pemrograman Backend - Pertemuan 9: Transaction Management & Concurrency Control
 
-Proyek RESTful API Manajemen Mahasiswa (*Students API*) berbasis Go, Fiber Framework, dan PostgreSQL. Modul ini merupakan penyempurnaan arsitektural dari modul sebelumnya dengan menerapkan **Centralized Error Handling**, **Declarative Validation**, **Keyset (Cursor-Based) Pagination**, dan **Content Negotiation**.
-
----
-
-## Fitur Utama & Pembaruan Modul 7
-
-1. **Sentralisasi Penanganan Error (Centralized Error Handling):**
-   - Eliminasi fungsi `helper.Fail` pada seluruh layer service dan middleware.
-   - Pemanfaatan custom error struct `AppError` yang mengimplementasikan interface standar Go `error` dan method `Unwrap()`.
-   - Pola *fail-closed* di mana seluruh error diteruskan ke middleware terpusat `ErrorHandler` di `config/app.go` untuk menghasilkan respons seragam bertipe `ErrorResponse` (`success`, `code`, `message`, `request_id`).
-
-2. **Validasi Deklaratif (Declarative Validation):**
-   - Penggantian validasi manual imperatif dengan tag struct deklaratif menggunakan pustaka `go-playground/validator/v10`.
-   - Pendaftaran custom validator:
-     - `nim_format`: Memvalidasi bahwa NIM harus tepat terdiri dari 9 karakter digit numerik.
-     - `strongpassword`: Memvalidasi kompleksitas kata sandi pengguna (minimal 8 karakter, memuat huruf besar, huruf kecil, angka, dan simbol).
-   - Penanganan pembaruan parsial (`PATCH`) menggunakan pointer field (`*string`, `*bool`) berpadu dengan tag `omitnil`.
-
-3. **Keyset (Cursor-Based) Pagination:**
-   - Menggantikan offset pagination tradisional guna mengatasi penurunan performa O(N) dan anomali *window drift* pada data berskala besar.
-   - Menggunakan filtering predikat tuple `(created_at, id) < ($1, $2)` dengan kursor terenkode Base64.
-   - Didukung oleh indeks komposit b-tree PostgreSQL `idx_students_created_at_id_desc` untuk pencarian berbasis *index scan* O(log N).
-
-4. **Content Negotiation (RFC 9110 & RFC 4180):**
-   - Evaluasi header `Accept` pada endpoint pengambilan koleksi mahasiswa (`GET /api/v1/students`).
-   - Format `application/json` merespons payload data terpaginasi beserta metadata cursor.
-   - Format `text/csv` mengalirkan data baris tabel secara streaming menggunakan `csv.NewWriter`.
-   - Permintaan format yang tidak didukung secara otomatis ditolak dengan status HTTP `406 Not Acceptable`.
-
-5. **Mekanisme Keamanan Lanjutan (RBAC & Rate Limiting):**
-   - Autentikasi stateless berbasis JWT Bearer Token dengan penanganan refresh token rotasional.
-   - Kontrol akses berbasis izin atomik (`RequirePermission`) dan proteksi endpoint autentikasi menggunakan `LoginRateLimiter`.
+Proyek RESTful API Manajemen Mahasiswa dan Kartu Rencana Studi (*Students & Courses API*) berbasis Go, Fiber Framework, dan PostgreSQL (`pgxpool`). Modul ini mengimplementasikan manajemen transaksi ACID terisolasi menggunakan abstraksi **`TxManager`**, kontrol konkurensi **Pessimistic Locking** (`SELECT ... FOR UPDATE`), **Optimistic Locking** (berbasis kolom `version`), serta pembuktian integritas data melalui pengujian beban (*load testing*).
 
 ---
 
-## Skema Basis Data & Indeks
+## Fitur Utama & Pembaruan Modul 9
 
-### 1. Tabel users
-Menyimpan kredensial dan peran pengguna:
-- `id` (SERIAL PRIMARY KEY)
-- `username` (VARCHAR(50), UNIQUE, NOT NULL)
-- `email` (VARCHAR(100), UNIQUE, NOT NULL)
-- `password` (VARCHAR(255), NOT NULL, Hashed bcrypt)
-- `role` (VARCHAR(20), DEFAULT 'user')
-- `is_active` (BOOLEAN, DEFAULT TRUE)
-- `created_at` & `updated_at` (TIMESTAMPTZ)
+1. **Abstraksi Transaksi (`TxManager`):**
+   - Mengisolasi dependensi driver database dari domain service menggunakan closure `WithTx(ctx, func(tx DBTX) error)`.
+   - Menangani otomatisasi siklus hidup transaksi: `Begin`, `Commit`, dan `Rollback` saat runtime panic atau error.
+   - Mekanisme retry otomatis berlandaskan jitter backoff acak untuk mengatasi error konkurensi transien PostgreSQL (Deadlock `40P01` dan Serialization Failure `40001`).
 
-### 2. Tabel students
-Menyimpan data entitas mahasiswa:
+2. **Kontrol Konkurensi Tingkat Lanjut (Pessimistic & Optimistic Locking):**
+   - **Pessimistic Locking (`LockStudent` & `LockCourses`):** Mengunci record mahasiswa dan baris kelas secara deterministik berurutan (`ORDER BY id FOR UPDATE`) guna mencegah *race condition* pendaftaran serentak dan mengeliminasi risiko siklus *deadlock* saat *swap* kelas berlawanan arah.
+   - **Optimistic Locking (`UpdateQuota`):** Pembaruan kuota kelas memvalidasi keselarasan versi data secara atomik (`WHERE id = $1 AND version = $2`), mendeteksi konflik pembaruan serentak dengan error `VERSION_CONFLICT`.
+
+3. **Penyelesaian 9 Puzzle Bugs:**
+   - Memperbaiki kebocoran kuota (*overselling*) pada kueri pembaruan kursi (`< quota` vs `<= quota`).
+   - Validasi pembatalan pendaftaran fiktif melalui pengecekan `RowsAffected()`.
+   - Mengalihkan eksekusi pelepasan kursi di service swap agar terikat penuh di dalam konteks transaksi (`repo.DecrementEnrolled`).
+   - Sinkronisasi kenaikan versi (`version = version + 1`) pada operasi kuota.
+
+4. **Pengujian Beban Serentak (*Load Testing Suite*):**
+   - Perkakas CLI pengujian beban multi-goroutine di `tools/loadtest` yang mensimulasikan gerbang pelepasan serentak (*barrier synchronization* via channel Go).
+   - Validasi ketat pada skenario *Crowd* (perebutan kuota terbatas), *Credits* (penegakan batas 24 SKS), dan *Swap* (perpindahan kelas silang dua arah).
+
+---
+
+## Skema Basis Data & Relasi Tambahan
+
+### 1. Tabel `courses`
+Menyimpan katalog mata kuliah:
 - `id` (SERIAL PRIMARY KEY)
-- `nim` (VARCHAR(20), UNIQUE, NOT NULL)
+- `code` (VARCHAR(20), UNIQUE, NOT NULL)
 - `name` (VARCHAR(100), NOT NULL)
-- `grade` (VARCHAR(5), NOT NULL)
-- `is_active` (BOOLEAN, DEFAULT TRUE)
-- `owner_id` (INT, REFERENCES users(id) ON DELETE SET NULL)
-- `created_at` & `updated_at` (TIMESTAMPTZ)
+- `credits` (INT, NOT NULL, CHECK > 0)
+- `quota` (INT, NOT NULL, CHECK > 0)
+- `enrolled_count` (INT, DEFAULT 0, CHECK >= 0)
+- `version` (INT, DEFAULT 1, NOT NULL)
+- `created_at` (TIMESTAMPTZ, DEFAULT NOW())
 
-### 3. Indeks Khusus (Modul 7)
-- `idx_students_created_at_id_desc` pada tabel `students(created_at DESC, id DESC)` untuk mengoptimalkan keyset pagination.
-
----
-
-## Panduan Menjalankan Aplikasi
-
-1. Setup Database & Migrasi Indeks:
-   psql -U postgres -d praktikum_backend -f migrations/005_cursor_index.sql
-
-2. Konfigurasi Environment Variable (.env):
-   APP_PORT=3000
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_USER=postgres
-   DB_PASSWORD=your_password
-   DB_NAME=praktikum_backend
-   DB_SSLMODE=disable
-   JWT_SECRET=supersecretkey
-
-3. Jalankan Aplikasi:
-   go run main.go
+### 2. Tabel `enrollments`
+Pencatatan relasi pendaftaran KRS mahasiswa:
+- `id` (SERIAL PRIMARY KEY)
+- `course_id` (INT, REFERENCES courses(id) ON DELETE CASCADE)
+- `user_id` (INT, REFERENCES users(id) ON DELETE CASCADE)
+- `created_at` (TIMESTAMPTZ, DEFAULT NOW())
+- Constraint: `UNIQUE(course_id, user_id)` (mencegah pendaftaran ganda).
 
 ---
 
-## Matriks Hak Akses Endpoint
+## Matriks Endpoint Tambahan (KRS & Transaksi)
 
 | Method | Endpoint | Izin / Proteksi | Hak Akses Role | Keterangan |
 | :--- | :--- | :--- | :--- | :--- |
-| POST | /api/v1/auth/login | Rate Limiter | Publik | Autentikasi & penerbitan token |
-| POST | /api/v1/auth/register | Validasi Deklaratif | Publik | Registrasi akun baru |
-| GET | /api/v1/students | student:list + Conneg | staff, admin | Daftar mahasiswa (Keyset Pagination & CSV/JSON) |
-| GET | /api/v1/students/:id | student:read / Ownership | admin, staff, user (pemilik) | Detail data mahasiswa |
-| POST | /api/v1/students | student:create | admin | Tambah mahasiswa (Validasi deklaratif & NIM kustom) |
-| PATCH | /api/v1/students/:id | student:update / Ownership | admin, user (pemilik) | Pembaruan data parsial (omitnil) |
-| DELETE | /api/v1/students/:id | student:delete | admin | Penghapusan data mahasiswa |
+| GET | /api/v1/courses | Bearer Auth | Semua Role | Katalog kelas yang tersedia |
+| GET | /api/v1/courses/mine | Bearer Auth | Mahasiswa (User) | Rincian KRS dan total SKS yang diambil |
+| GET | /api/v1/courses/:id | Bearer Auth | Semua Role | Detail kelas |
+| POST | /api/v1/courses/:id/enroll | Bearer Auth | Mahasiswa (User) | Pendaftaran kelas (Transaksi ACID & Lock) |
+| DELETE | /api/v1/courses/:id/enroll | Bearer Auth | Mahasiswa (User) | Pembatalan kelas (Drop) |
+| POST | /api/v1/enrollments/swap | Bearer Auth | Mahasiswa (User) | Perpindahan kelas silang (Deadlock-Free Swap) |
+| PATCH | /api/v1/courses/:id | course:manage | Admin, Staff | Pembaruan kuota kelas (Optimistic Lock) |
+
+---
+
+## Panduan Menjalankan Migrasi & Uji Beban
+
+1. Eksekusi Skema dan Data Uji Beban:
+   psql -U postgres -d praktikum_backend -f migrations/006_courses.sql
+   psql -U postgres -d praktikum_backend -f migrations/007_seed_loadtest.sql
+
+2. Jalankan Server:
+   go run main.go
+
+3. Eksekusi Pengujian Beban (*Loadtest CLI*):
+   # Mode 1: Uji Perebutan Kuota Terbatas (60 Mhs vs 5 Kuota IF399)
+   go run ./tools/loadtest -mode crowd
+
+   # Mode 2: Uji Batas SKS (10 Mhs x 12 Kelas Serentak, Batas 24 SKS)
+   go run ./tools/loadtest -mode credits
+
+   # Mode 3: Uji Bebas Deadlock (20 Pasang Mhs Swap Berlawanan Arah)
+   go run ./tools/loadtest -mode swap
