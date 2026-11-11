@@ -1,6 +1,6 @@
 # Deklarasi Penggunaan AI (AI-USAGE)
 
-Sesuai dengan prinsip integritas akademik dan transparansi pedoman perkuliahan, dokumen ini mencatat pemanfaatan alat bantu kecerdasan buatan (*Artificial Intelligence*) selama pengerjaan proyek Modul 9 (Transaction Management, Pessimistic/Optimistic Concurrency Control, and Load Testing).
+Sesuai dengan prinsip integritas akademik dan transparansi pedoman perkuliahan, dokumen ini mencatat pemanfaatan alat bantu kecerdasan buatan (*Artificial Intelligence*) selama pengerjaan proyek Modul 10 (Multi-Database Integration with MongoDB, Embedded Document Lifecycle, Aggregation Pipeline, and Cross-Database Validation).
 
 ---
 
@@ -15,17 +15,18 @@ Sesuai dengan prinsip integritas akademik dan transparansi pedoman perkuliahan, 
 
 | Modul / Komponen | Bentuk Kontribusi AI | Tingkat Bantuan |
 | :--- | :--- | :--- |
-| **Abstraksi `TxManager` (`app/repository/tx.go`)** | Bantuan penyusunan implementasi closure transaksi atomik, integrasi interface `DBTX`, pemetaan error transien PostgreSQL (`40P01`, `40001`), dan logika retry berlandaskan exponential backoff dengan jitter acak. | Sedang |
-| **Penyelidikan 9 Puzzle Bugs (`app/repository/`, `app/service/`)** | Bantuan pelacakan dan pembetulan cacat konkurensi: kondisi batas kuota (`< quota`), evaluasi `cmd.RowsAffected()` pada penghapusan pendaftaran, isolasi transaksi `repo.DecrementEnrolled`, dan inkrementasi `version` untuk *optimistic locking*. | Tinggi |
-| **Kontrol Konkurensi & Pencegahan Deadlock (`course_service.go`, `course_repository.go`)** | Formulasi strategi penguncian deterministik berurutan `ORDER BY id FOR UPDATE` pada metode `LockCourses` dan penguncian baris akun mahasiswa via `LockStudent`. | Sedang |
-| **Perkakas Pengujian Beban (*Loadtest Tool*)** | Panduan pembuatan skrip pengujian berbasis *goroutine* dan barrier synchronization channel untuk skenario `crowd`, `credits`, dan `swap`. | Rendah |
-| **Pemecahan Masalah Eksekusi & Konfigurasi** | Bantuan resolusi impor dependensi yang tidak terpakai pada compiler Go serta penyesuaian target migrasi database `praktikum_backend`. | Rendah |
+| **Integrasi Klien MongoDB (`database/mongo.go` & `main.go`)** | Bantuan penyusunan perakitan koneksi driver MongoDB resmi, penanganan *timeout context*, *graceful shutdown disconnect*, serta pendaftaran *compound index* pada startup aplikasi. | Sedang |
+| **Pipeline Agregasi Statistik (`portfolio_repository.go`)** | Bantuan penyusunan tahapan agregasi multi-stage MongoDB (`$unwind` ganda untuk nested sub-documents, `$group` untuk penghitungan total, `$sort` descending, dan `$limit`). | Sedang |
+| **Validasi Lintas Basis Data (*Cross-Database Integrity*)** | Arahan penerapan pengecekan keberadaan ID mahasiswa di PostgreSQL sebelum mutasi dokumen MongoDB pada layer service (`PortfolioService`). | Rendah |
+| **Penyusunan Perintah Pengujian Terminal (*cURL Test Suite*)** | Penyusunan skrip cURL untuk pengujian berurutan: registrasi akun, login JWT, validasi error 404 (ID fiktif), *upsert* portofolio, penambahan proyek dengan normalisasi huruf kecil, agregasi statistik, dan penghapusan proyek atomik. | Rendah |
+| **Troubleshooting Driver & Service MongoDB macOS** | Panduan mengatasi error `connection refused` dan konfigurasi *tap* formula `mongodb/brew` pada package manager Homebrew macOS. | Rendah |
 
 ---
 
 ## 3. Pekerjaan Mandiri (Human Contribution)
-- Penyiapan database PostgreSQL lokal `praktikum_backend` dan eksekusi skrip DDL migrasi tabel `courses`, `enrollments`, serta skrip pengisian seed data beban `007_seed_loadtest.sql`.
-- Penulisan aturan murni pembatasan SKS (*pure rule functions*) pada `app/service/course_rules.go` dan perancangan payload DTO di `app/model/course.go`.
-- Perakitan dependency injection di `main.go` untuk menghubungkan `TxManager` ke `CourseService` dan konfigurasi router Fiber.
-- Eksekusi langsung uji beban konkurensi di lingkungan terminal lokal macOS pada ketiga mode (`crowd`, `credits`, `swap`) serta verifikasi integritas data akhir di PostgreSQL (memastikan tidak terjadi ketidaksesuaian antara `enrolled_count` dan total baris `enrollments`).
-- Pengelolaan version control git (pembuatan micro-commit atomik, pembaruan `go.mod`/`go.sum`, serta sinkronisasi branch utama).
+- Penyiapan dan konfigurasi service MongoDB lokal (`mongodb-community`) menggunakan Homebrew di macOS.
+- Perancangan model DTO dan entitas BSON/JSON portofolio (`app/model/portfolio.go`) serta pemetaan tag validasi Fiber.
+- Implementasi logika bisnis di `PortfolioService` mencakup aturan normalisasi tag teknologi dan pembatasan maksimal 20 proyek per portofolio.
+- Konfigurasi registrasi routing di `route/route.go` dan perakitan dependency injection pada `main.go`.
+- Pengujian langsung seluruh alur integrasi end-to-end melalui terminal menggunakan cURL dan verifikasi struktur BSON dokumen MongoDB melalui terminal.
+- Pengelolaan version control git (pembuatan micro-commit terstruktur, pembaharuan berkas dokumentasi `README.md` dan `AI-USAGE.md`, serta sinkronisasi commit ke remote repository).

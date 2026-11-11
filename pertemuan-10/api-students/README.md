@@ -1,84 +1,77 @@
-# Praktikum Pemrograman Backend - Pertemuan 9: Transaction Management & Concurrency Control
+# Praktikum Pemrograman Backend - Pertemuan 10: Multi-Database Integration & Student Portfolio
 
-Proyek RESTful API Manajemen Mahasiswa dan Kartu Rencana Studi (*Students & Courses API*) berbasis Go, Fiber Framework, dan PostgreSQL (`pgxpool`). Modul ini mengimplementasikan manajemen transaksi ACID terisolasi menggunakan abstraksi **`TxManager`**, kontrol konkurensi **Pessimistic Locking** (`SELECT ... FOR UPDATE`), **Optimistic Locking** (berbasis kolom `version`), serta pembuktian integritas data melalui pengujian beban (*load testing*).
-
----
-
-## Fitur Utama & Pembaruan Modul 9
-
-1. **Abstraksi Transaksi (`TxManager`):**
-   - Mengisolasi dependensi driver database dari domain service menggunakan closure `WithTx(ctx, func(tx DBTX) error)`.
-   - Menangani otomatisasi siklus hidup transaksi: `Begin`, `Commit`, dan `Rollback` saat runtime panic atau error.
-   - Mekanisme retry otomatis berlandaskan jitter backoff acak untuk mengatasi error konkurensi transien PostgreSQL (Deadlock `40P01` dan Serialization Failure `40001`).
-
-2. **Kontrol Konkurensi Tingkat Lanjut (Pessimistic & Optimistic Locking):**
-   - **Pessimistic Locking (`LockStudent` & `LockCourses`):** Mengunci record mahasiswa dan baris kelas secara deterministik berurutan (`ORDER BY id FOR UPDATE`) guna mencegah *race condition* pendaftaran serentak dan mengeliminasi risiko siklus *deadlock* saat *swap* kelas berlawanan arah.
-   - **Optimistic Locking (`UpdateQuota`):** Pembaruan kuota kelas memvalidasi keselarasan versi data secara atomik (`WHERE id = $1 AND version = $2`), mendeteksi konflik pembaruan serentak dengan error `VERSION_CONFLICT`.
-
-3. **Penyelesaian 9 Puzzle Bugs:**
-   - Memperbaiki kebocoran kuota (*overselling*) pada kueri pembaruan kursi (`< quota` vs `<= quota`).
-   - Validasi pembatalan pendaftaran fiktif melalui pengecekan `RowsAffected()`.
-   - Mengalihkan eksekusi pelepasan kursi di service swap agar terikat penuh di dalam konteks transaksi (`repo.DecrementEnrolled`).
-   - Sinkronisasi kenaikan versi (`version = version + 1`) pada operasi kuota.
-
-4. **Pengujian Beban Serentak (*Load Testing Suite*):**
-   - Perkakas CLI pengujian beban multi-goroutine di `tools/loadtest` yang mensimulasikan gerbang pelepasan serentak (*barrier synchronization* via channel Go).
-   - Validasi ketat pada skenario *Crowd* (perebutan kuota terbatas), *Credits* (penegakan batas 24 SKS), dan *Swap* (perpindahan kelas silang dua arah).
+Proyek RESTful API Manajemen Mahasiswa (*Students API*) berbasis Go, Fiber Framework, PostgreSQL (`pgxpool`), dan MongoDB. Modul ini mengimplementasikan arsitektur *polyglot persistence* (multi-database) dengan memadukan basis data relasional PostgreSQL untuk entitas inti mahasiswa dan otentikasi pengguna, serta basis data dokumen MongoDB untuk mengelola data portofolio yang dinamis (*nested sub-documents*), pipeline agregasi data (*aggregation pipeline*), dan penegakan integritas data lintas basis data (*cross-database integrity*).
 
 ---
 
-## Skema Basis Data & Relasi Tambahan
+## Fitur Utama & Pembaruan Modul 10
 
-### 1. Tabel `courses`
-Menyimpan katalog mata kuliah:
-- `id` (SERIAL PRIMARY KEY)
-- `code` (VARCHAR(20), UNIQUE, NOT NULL)
-- `name` (VARCHAR(100), NOT NULL)
-- `credits` (INT, NOT NULL, CHECK > 0)
-- `quota` (INT, NOT NULL, CHECK > 0)
-- `enrolled_count` (INT, DEFAULT 0, CHECK >= 0)
-- `version` (INT, DEFAULT 1, NOT NULL)
-- `created_at` (TIMESTAMPTZ, DEFAULT NOW())
+1. **Integrasi Basis Data Dokumen (MongoDB Go Driver):**
+   - Inisialisasi koneksi `NewMongoClient` dengan timeout kontekstual, verifikasi ping, pembacaan konfigurasi database via environment variable (`MONGO_DATABASE`), serta penanganan *graceful disconnect* saat aplikasi berhenti.
+   - Penjaminan indeks otomatis (`EnsureIndexes`) pada koleksi `portfolios` dengan *compound unique index* pada `student_id` guna memastikan hubungan 1-to-1 antar data mahasiswa dan portofolionya.
 
-### 2. Tabel `enrollments`
-Pencatatan relasi pendaftaran KRS mahasiswa:
-- `id` (SERIAL PRIMARY KEY)
-- `course_id` (INT, REFERENCES courses(id) ON DELETE CASCADE)
-- `user_id` (INT, REFERENCES users(id) ON DELETE CASCADE)
-- `created_at` (TIMESTAMPTZ, DEFAULT NOW())
-- Constraint: `UNIQUE(course_id, user_id)` (mencegah pendaftaran ganda).
+2. **Integritas Data Lintas Basis Data (*Cross-Database Integrity*):**
+   - Validasi keberadaan entitas mahasiswa di PostgreSQL (`studentRepo.FindByID`) sebelum menjalankan operasi mutasi atau kueri pada koleksi MongoDB.
+   - Penanganan terpusat jika ID mahasiswa tidak ditemukan (`404 NOT_FOUND`), mencegah terbentuknya *orphan documents* di dalam koleksi MongoDB.
+
+3. **Manajemen Portofolio & Sub-Dokumen Proyek:**
+   - **Upsert Portofolio (`PUT /students/:id/portfolio`):** Operasi idempoten menggunakan opsi `SetUpsert(true)` dengan pembaruan otomatis kolom timestamp `updated_at`.
+   - **Penambahan Proyek Tersemat (`POST /students/:id/portfolio/projects`):** Menambahkan data proyek ke dalam array `projects` menggunakan operator atomik `$push`, pembuatan `ObjectID` unik per entitas proyek, dan penegakan batas kuota maksimal 20 proyek per mahasiswa (`409 CONFLICT: PROJECT_LIMIT`).
+   - **Normalisasi Tag Teknologi:** Penyeragaman otomatis nama teknologi ke format huruf kecil (*lowercase*) sebelum disimpan ke basis data untuk mempermudah pencarian dan agregasi yang konsisten.
+   - **Penghapusan Proyek Tertentu (`DELETE /students/:id/portfolio/projects/:projectId`):** Menghapus sub-dokumen dari array tersemat secara atomik menggunakan operator `$pull`.
+
+4. **Pipeline Agregasi Statistik Teknologi (`GET /portfolios/stats/technologies`):**
+   - Pemanfaatan tahapan agregasi MongoDB teroptimasi:
+     - `$unwind`: Memecah array sub-dokumen `projects`.
+     - `$unwind`: Memecah array string `technologies`.
+     - `$group`: Mengelompokkan berdasarkan nama teknologi dan menghitung total frekuensi kemunculan (`$sum: 1`).
+     - `$sort`: Mengurutkan popularitas teknologi dari frekuensi terbanyak (descending).
+     - `$limit`: Membatasi jumlah keluaran teknologi teratas.
 
 ---
 
-## Matriks Endpoint Tambahan (KRS & Transaksi)
+## Skema Dokumen MongoDB (`portfolios`)
+
+```json
+{
+  "_id": "ObjectID",
+  "student_id": 3,
+  "headline": "Backend Engineer & Cloud Enthusiast",
+  "bio": "Mahasiswa Teknik Informatika yang fokus pada high-concurrency backend dan distributed systems.",
+  "projects": [
+    {
+      "_id": "ObjectID",
+      "title": "High Performance Student Management API",
+      "technologies": ["go", "fiber", "postgresql", "mongodb", "docker"],
+      "link": "[https://github.com/mrcleverloki/api-students](https://github.com/mrcleverloki/api-students)",
+      "year": 2026
+    }
+  ],
+  "certificates": [],
+  "created_at": "ISODate",
+  "updated_at": "ISODate"
+}
+
+## Matriks Endpoint Tambahan (Portofolio Mahasiswa)
 
 | Method | Endpoint | Izin / Proteksi | Hak Akses Role | Keterangan |
 | :--- | :--- | :--- | :--- | :--- |
-| GET | /api/v1/courses | Bearer Auth | Semua Role | Katalog kelas yang tersedia |
-| GET | /api/v1/courses/mine | Bearer Auth | Mahasiswa (User) | Rincian KRS dan total SKS yang diambil |
-| GET | /api/v1/courses/:id | Bearer Auth | Semua Role | Detail kelas |
-| POST | /api/v1/courses/:id/enroll | Bearer Auth | Mahasiswa (User) | Pendaftaran kelas (Transaksi ACID & Lock) |
-| DELETE | /api/v1/courses/:id/enroll | Bearer Auth | Mahasiswa (User) | Pembatalan kelas (Drop) |
-| POST | /api/v1/enrollments/swap | Bearer Auth | Mahasiswa (User) | Perpindahan kelas silang (Deadlock-Free Swap) |
-| PATCH | /api/v1/courses/:id | course:manage | Admin, Staff | Pembaruan kuota kelas (Optimistic Lock) |
+| PUT | /api/v1/students/:id/portfolio | Bearer Auth | Admin, Staff, Owner | Membuat atau memperbarui data dasar portofolio |
+| GET | /api/v1/students/:id/portfolio | Bearer Auth | Semua Role | Mengambil data portofolio lengkap mahasiswa |
+| POST | /api/v1/students/:id/portfolio/projects | Bearer Auth | Admin, Staff, Owner | Menambahkan proyek baru (Maks. 20 proyek) |
+| DELETE | /api/v1/students/:id/portfolio/projects/:projectId | Bearer Auth | Admin, Staff, Owner | Menghapus proyek spesifik dari array portofolio |
+| GET | /api/v1/portfolios/stats/technologies | Bearer Auth | Semua Role | Agregasi statistik teknologi proyek terpopuler |
 
 ---
 
-## Panduan Menjalankan Migrasi & Uji Beban
+## Panduan Menjalankan Layanan
 
-1. Eksekusi Skema dan Data Uji Beban:
-   psql -U postgres -d praktikum_backend -f migrations/006_courses.sql
-   psql -U postgres -d praktikum_backend -f migrations/007_seed_loadtest.sql
+1. **Jalankan Service Basis Data:**
+   - PostgreSQL: `brew services start postgresql@16`
+   - MongoDB: `brew services start mongodb-community`
 
-2. Jalankan Server:
-   go run main.go
+2. **Jalankan Server API:**
+   - `go run main.go`
 
-3. Eksekusi Pengujian Beban (*Loadtest CLI*):
-   # Mode 1: Uji Perebutan Kuota Terbatas (60 Mhs vs 5 Kuota IF399)
-   go run ./tools/loadtest -mode crowd
-
-   # Mode 2: Uji Batas SKS (10 Mhs x 12 Kelas Serentak, Batas 24 SKS)
-   go run ./tools/loadtest -mode credits
-
-   # Mode 3: Uji Bebas Deadlock (20 Pasang Mhs Swap Berlawanan Arah)
-   go run ./tools/loadtest -mode swap
+3. **Verifikasi Status Koneksi Basis Data:**
+   - `curl -i http://localhost:3000/api/v1/health`
