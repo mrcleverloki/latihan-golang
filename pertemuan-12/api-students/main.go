@@ -124,6 +124,12 @@ func startAPI(logger *slog.Logger, pool *pgxpool.Pool) (*fiber.App, func()) {
 		return nil, nil
 	}
 
+	reviewRepo := repository.NewReviewRepository(mongoDB)
+	if err := reviewRepo.EnsureIndexes(context.Background()); err != nil {
+		logger.Error("gagal membuat index mongodb review", slog.String("error", err.Error()))
+		return nil, nil
+	}
+
 	// Muat Permissions
 	rawPermissions, err := roleRepo.LoadPermissions(context.Background())
 	if err != nil {
@@ -141,6 +147,7 @@ func startAPI(logger *slog.Logger, pool *pgxpool.Pool) (*fiber.App, func()) {
 	courseService := service.NewCourseService(courseRepo, outboxRepo, txManager)
 	portfolioService := service.NewPortfolioService(portfolioRepo, studentRepo)
 	notificationService := service.NewNotificationService(notificationRepo, outboxRepo, inspector)
+	reviewService := service.NewReviewService(reviewRepo, courseRepo, perms)
 
 	deps := route.Dependencies{
 		Pool:                pool,
@@ -152,6 +159,7 @@ func startAPI(logger *slog.Logger, pool *pgxpool.Pool) (*fiber.App, func()) {
 		CourseService:       courseService,
 		PortfolioService:    portfolioService,
 		NotificationService: notificationService,
+		ReviewService:       reviewService,
 	}
 
 	app := config.NewApp(logger, deps)

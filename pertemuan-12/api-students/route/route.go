@@ -23,6 +23,7 @@ type Dependencies struct {
 	CourseService       *service.CourseService
 	PortfolioService    *service.PortfolioService
 	NotificationService *service.NotificationService
+	ReviewService       *service.ReviewService
 }
 
 func Register(app *fiber.App, deps Dependencies) {
@@ -70,6 +71,10 @@ func Register(app *fiber.App, deps Dependencies) {
 	courses.Post("/:id/enroll", deps.CourseService.Enroll)
 	courses.Delete("/:id/enroll", deps.CourseService.Drop)
 	courses.Patch("/:id", middleware.RequirePermission(deps.Permissions, "course:manage"), deps.CourseService.UpdateQuota)
+
+	// Endpoint ulasan kelas (Review)
+	courses.Post("/:id/reviews", deps.ReviewService.Create)
+	courses.Get("/:id/reviews", deps.ReviewService.ListByCourse)
 
 	// 5. Endpoint perpindahan kelas (swap)
 	enrollments := api.Group("/enrollments",
