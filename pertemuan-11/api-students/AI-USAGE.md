@@ -1,6 +1,6 @@
 # Deklarasi Penggunaan AI (AI-USAGE)
 
-Sesuai dengan prinsip integritas akademik dan transparansi pedoman perkuliahan, dokumen ini mencatat pemanfaatan alat bantu kecerdasan buatan (*Artificial Intelligence*) selama pengerjaan proyek Modul 10 (Multi-Database Integration with MongoDB, Embedded Document Lifecycle, Aggregation Pipeline, and Cross-Database Validation).
+Sesuai dengan prinsip integritas akademik dan transparansi pedoman perkuliahan, dokumen ini mencatat pemanfaatan alat bantu kecerdasan buatan (*Artificial Intelligence*) selama pengerjaan proyek Modul 11 (Asynchronous Notifications, Transactional Outbox Pattern, Asynq Task Queue, Idempotency Verification, and Multi-Role Orchestration).
 
 ---
 
@@ -15,18 +15,18 @@ Sesuai dengan prinsip integritas akademik dan transparansi pedoman perkuliahan, 
 
 | Modul / Komponen | Bentuk Kontribusi AI | Tingkat Bantuan |
 | :--- | :--- | :--- |
-| **Integrasi Klien MongoDB (`database/mongo.go` & `main.go`)** | Bantuan penyusunan perakitan koneksi driver MongoDB resmi, penanganan *timeout context*, *graceful shutdown disconnect*, serta pendaftaran *compound index* pada startup aplikasi. | Sedang |
-| **Pipeline Agregasi Statistik (`portfolio_repository.go`)** | Bantuan penyusunan tahapan agregasi multi-stage MongoDB (`$unwind` ganda untuk nested sub-documents, `$group` untuk penghitungan total, `$sort` descending, dan `$limit`). | Sedang |
-| **Validasi Lintas Basis Data (*Cross-Database Integrity*)** | Arahan penerapan pengecekan keberadaan ID mahasiswa di PostgreSQL sebelum mutasi dokumen MongoDB pada layer service (`PortfolioService`). | Rendah |
-| **Penyusunan Perintah Pengujian Terminal (*cURL Test Suite*)** | Penyusunan skrip cURL untuk pengujian berurutan: registrasi akun, login JWT, validasi error 404 (ID fiktif), *upsert* portofolio, penambahan proyek dengan normalisasi huruf kecil, agregasi statistik, dan penghapusan proyek atomik. | Rendah |
-| **Troubleshooting Driver & Service MongoDB macOS** | Panduan mengatasi error `connection refused` dan konfigurasi *tap* formula `mongodb/brew` pada package manager Homebrew macOS. | Rendah |
+| **Analisis & Perbaikan Puzzle Bug Modul (Tugas D.1)** | Bantuan identifikasi 8 bug bawaan modul, mencakup perbaikan transaksi `DBTX` pada outbox repository, locking `FOR UPDATE SKIP LOCKED`, opsi timeout Asynq, integrasi signature handler `asynq.Task`, pembungkusan `asynq.SkipRetry`, serta perbaikan mismatch nama queue pada `config/queue.go`. | Sedang |
+| **Penyusunan Arsitektur Transaksional Outbox (`outbox_repository.go` & `outbox_relay.go`)** | Panduan struktur *polling consumer*, locking batch outbox, dan penanganan graceful stop relay via konteks `signal.NotifyContext`. | Sedang |
+| **Refactoring Lifecycle & Multi-Role Entrypoint (`main.go` & `worker.go`)** | Bantuan penyusunan abstraksi CLI flag `-role` (`api`, `worker`, `all`), inisialisasi `asynq.Inspector`, serta sinkronisasi graceful shutdown antara Fiber HTTP server dan Asynq worker server. | Sedang |
+| **Pengembangan Tool Uji Idempotensi (`tools/redeliver/main.go`)** | Perancangan CLI tool injeksi task Asynq duplikat dengan penomoran `TaskID` dinamis berbasis timestamp nano guna menghindari benturan `ErrTaskIDConflict` di Redis. | Sedang |
+| **Perumusan Skenario Uji Ketahanan Sistem (Skenario C.1 - C.5)** | Panduan langkah verifikasi pengujian terminal (simulasi crash Redis, temporary failure, penolakan domain invalid, dan pengujian idempotensi). | Rendah |
 
 ---
 
 ## 3. Pekerjaan Mandiri (Human Contribution)
-- Penyiapan dan konfigurasi service MongoDB lokal (`mongodb-community`) menggunakan Homebrew di macOS.
-- Perancangan model DTO dan entitas BSON/JSON portofolio (`app/model/portfolio.go`) serta pemetaan tag validasi Fiber.
-- Implementasi logika bisnis di `PortfolioService` mencakup aturan normalisasi tag teknologi dan pembatasan maksimal 20 proyek per portofolio.
-- Konfigurasi registrasi routing di `route/route.go` dan perakitan dependency injection pada `main.go`.
-- Pengujian langsung seluruh alur integrasi end-to-end melalui terminal menggunakan cURL dan verifikasi struktur BSON dokumen MongoDB melalui terminal.
-- Pengelolaan version control git (pembuatan micro-commit terstruktur, pembaharuan berkas dokumentasi `README.md` dan `AI-USAGE.md`, serta sinkronisasi commit ke remote repository).
+- Penyiapan dan pemeliharaan service lokal macOS via Homebrew (PostgreSQL, MongoDB, dan Redis).
+- Pemeriksaan dan penyesuaian dependensi kode eksisting di `route/route.go` dan `main.go` agar tetap mempertahankan integrasi `StudentService`, `PortfolioService` (MongoDB), dan `CourseService`.
+- Pembuatan dan migrasi skema tabel `outbox` dan `notifications` di PostgreSQL.
+- Eksekusi manual seluruh skenario pengujian Bagian C (C.1 sampai C.5) menggunakan terminal macOS (zsh), cURL, dan psql.
+- Debugging kendala autentikasi (token JWT expired, penyesuaian header `Content-Type: application/json`, dan validasi password policy).
+- Pengelolaan version control git (penyusunan micro-commit terstruktur per modul, pembaruan dokumentasi teknis `README.md` dan `AI-USAGE.md`, serta sinkronisasi branch utama).
