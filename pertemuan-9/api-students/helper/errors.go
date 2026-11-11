@@ -97,3 +97,8 @@ func TooManyRequests(message string) *AppError {
 		Message: message,
 	}
 }
+
+// NewError dipakai bila sebuah kegagalan butuh kode error spesifik (misal: COURSE_FULL, NOT_ENROLLED)
+func NewError(status int, code, message string) *AppError {
+	return &AppError{Status: status, Code: code, Message: message}
+}

@@ -59,6 +59,20 @@ func Register(app *fiber.App, deps Dependencies) {
 		middleware.RequireAuth(deps.JWT),
 	)
 
+	courses.Get("/", deps.CourseService.List)
+	courses.Get("/mine", deps.CourseService.Mine)
+	courses.Get("/:id", deps.CourseService.Get)
+	courses.Post("/:id/enroll", deps.CourseService.Enroll)
+	courses.Delete("/:id/enroll", deps.CourseService.Drop)
+	courses.Patch("/:id", middleware.RequirePermission(deps.Permissions, "course:manage"), deps.CourseService.UpdateQuota)
+
+	// 5. Endpoint perpindahan kelas (swap)
+	enrollments := api.Group("/enrollments",
+		middleware.RequireJSON,
+		middleware.RequireAuth(deps.JWT),
+	)
+	enrollments.Post("/swap", deps.CourseService.Swap)
+
 	// "/mine" didaftarkan SEBELUM "/:id". Fiber mencocokkan route sesuai
 	// urutan pendaftaran; bila dibalik, "mine" akan dianggap sebagai :id.
 	courses.Get("/", deps.CourseService.List)

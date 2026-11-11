@@ -37,12 +37,13 @@ func main() {
 
 	jwtManager := helper.NewJWTManager(jwtSecret, jwtIssuer, accessTTL)
 
-	// 4. Dependency Injection: Repository
+	// 4. Dependency Injection: Repository & TxManager
 	studentRepo := repository.NewStudentRepository(pool)
 	userRepo := repository.NewUserRepository(pool)
 	tokenRepo := repository.NewTokenRepository(pool)
 	roleRepo := repository.NewRoleRepository(pool)
 	courseRepo := repository.NewCourseRepository(pool)
+	txManager := repository.NewTxManager(pool)
 
 	// 5. Muat Role Permissions dari DB (Fail Closed)
 	rawPermissions, err := roleRepo.LoadPermissions(context.Background())
@@ -56,7 +57,7 @@ func main() {
 	// 6. Services
 	studentService := service.NewStudentService(studentRepo, perms)
 	authService := service.NewAuthService(userRepo, tokenRepo, jwtManager, perms, refreshTTL)
-	courseService := service.NewCourseService(courseRepo)
+	courseService := service.NewCourseService(courseRepo, txManager)
 
 	// 7. Inisialisasi App dengan Dependencies
 	deps := route.Dependencies{
