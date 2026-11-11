@@ -21,15 +21,32 @@ func main() {
 	config.LoadEnv()
 	logger := config.NewLogger()
 
-	// 2. Koneksi ke database
+	// 2. Koneksi ke PostgreSQL
 	pool, err := database.NewPool(context.Background())
 	if err != nil {
-		logger.Error("gagal terhubung ke database", slog.String("error", err.Error()))
+		logger.Error("gagal terhubung ke database postgresql", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	defer pool.Close()
 
-	// 3. Konfigurasi Auth & JWT
+	// 3. Koneksi ke MongoDB
+	mongoClient, err := database.NewMongoClient(context.Background())
+	if err != nil {
+		logger.Error("gagal terhubung ke database mongodb", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer func() {
+		disconnectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := mongoClient.Disconnect(disconnectCtx); err != nil {
+			logger.Error("gagal disconnect mongodb", slog.String("error", err.Error()))
+		}
+	}()
+
+	mongoDatabaseName := config.GetEnv("MONGO_DATABASE", "praktikum_backend")
+	mongoDB := mongoClient.Database(mongoDatabaseName)
+
+	// 4. Konfigurasi Auth & JWT
 	jwtSecret := config.GetEnv("JWT_SECRET", "kunci-rahasia-minimal-32-karakter-harus-aman-banget")
 	jwtIssuer := config.GetEnv("JWT_ISSUER", "api-students")
 	accessTTL := 15 * time.Minute
@@ -37,7 +54,7 @@ func main() {
 
 	jwtManager := helper.NewJWTManager(jwtSecret, jwtIssuer, accessTTL)
 
-	// 4. Dependency Injection: Repository & TxManager
+	// 5. Dependency Injection: Repository & TxManager
 	studentRepo := repository.NewStudentRepository(pool)
 	userRepo := repository.NewUserRepository(pool)
 	tokenRepo := repository.NewTokenRepository(pool)
@@ -45,7 +62,13 @@ func main() {
 	courseRepo := repository.NewCourseRepository(pool)
 	txManager := repository.NewTxManager(pool)
 
-	// 5. Muat Role Permissions dari DB (Fail Closed)
+	portfolioRepo := repository.NewPortfolioRepository(mongoDB)
+	if err := portfolioRepo.EnsureIndexes(context.Background()); err != nil {
+		logger.Error("gagal membuat index mongodb portfolio", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	// 6. Muat Role Permissions dari DB (Fail Closed)
 	rawPermissions, err := roleRepo.LoadPermissions(context.Background())
 	if err != nil {
 		logger.Error("gagal memuat permission", slog.String("error", err.Error()))
@@ -54,19 +77,22 @@ func main() {
 	perms := helper.NewPermissionSet(rawPermissions)
 	logger.Info("permission dimuat", slog.Any("roles", perms.KnownRoles()))
 
-	// 6. Services
+	// 7. Services
 	studentService := service.NewStudentService(studentRepo, perms)
 	authService := service.NewAuthService(userRepo, tokenRepo, jwtManager, perms, refreshTTL)
 	courseService := service.NewCourseService(courseRepo, txManager)
+	portfolioService := service.NewPortfolioService(portfolioRepo, studentRepo)
 
-	// 7. Inisialisasi App dengan Dependencies
+	// 8. Inisialisasi App dengan Dependencies
 	deps := route.Dependencies{
-		Pool:           pool,
-		JWT:            jwtManager,
-		Permissions:    perms,
-		StudentService: studentService,
-		AuthService:    authService,
-		CourseService:  courseService,
+		Pool:             pool,
+		MongoClient:      mongoClient,
+		JWT:              jwtManager,
+		Permissions:      perms,
+		StudentService:   studentService,
+		AuthService:      authService,
+		CourseService:    courseService,
+		PortfolioService: portfolioService,
 	}
 	app := config.NewApp(logger, deps)
 	port := config.GetEnv("APP_PORT", "3000")
@@ -80,7 +106,7 @@ func main() {
 
 	logger.Info("server berjalan", slog.String("port", port))
 
-	// 8. Graceful shutdown
+	// 9. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
